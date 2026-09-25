@@ -23,7 +23,6 @@ struct Snapshot {
     var claudeFive: Window?
     var fable: Window?
     var gptWeekly: Window?
-    var spark: Window?
     var resetCredits: Int?
     var claudeOK = false
     var gptOK = false
@@ -112,10 +111,6 @@ func loadSnapshot() async -> Snapshot {
         let account = (quotas["__main__"] as? [String: Any]) ?? (quotas.values.first as? [String: Any])
         if let account {
             snapshot.gptWeekly = makeWindow(account["weeklyPercent"], account["weeklyResetAt"])
-            if let custom = account["customWindows"] as? [[String: Any]],
-               let row = custom.first(where: { ($0["label"] as? String)?.lowercased().contains("spark") == true }) {
-                snapshot.spark = makeWindow(row["percent"], row["resetAt"])
-            }
             snapshot.resetCredits = asNumber(account["resetCredits"]).map { Int($0) }
             snapshot.gptOK = snapshot.gptWeekly != nil
         }
@@ -342,7 +337,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
             addHeader("GPT")
             addRow("Weekly", snapshot.gptWeekly)
-            addRow("Spark weekly", snapshot.spark)
             if let credits = snapshot.resetCredits {
                 menu.addItem(.separator())
                 addHeader(String(credits) + (credits == 1 ? " reset credit left" : " reset credits left"))
@@ -385,7 +379,6 @@ if CommandLine.arguments.contains("--dump") {
         line("5-hour", snap.claudeFive)
         print("GPT")
         line("Weekly", snap.gptWeekly)
-        line("Spark weekly", snap.spark)
         if let credits = snap.resetCredits { print(String(credits) + " reset credits left") }
     }
     exit(0)
