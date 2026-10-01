@@ -12,6 +12,10 @@ agent="$HOME/Library/LaunchAgents/$label.plist"
 rm -rf "$app_path"
 cp -R "$root/build/Usage Bar.app" "$app_path"
 
+# Without this, System Settings shows the login item as a generic "exec" tile.
+swift -module-cache-path "$root/build/module-cache" "$root/tools/set-file-icon.swift" \
+  "$app_path/Contents/Resources/AppIcon.icns" "$app_path/Contents/MacOS/Usage Bar"
+
 # The plist has to carry an absolute path, so it is generated rather than checked in.
 mkdir -p "$HOME/Library/LaunchAgents"
 sed "s|__APP_PATH__|$app_path|" "$root/launchagent/$label.plist.template" > "$agent"
