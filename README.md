@@ -82,7 +82,8 @@ signed with a developer certificate. So `install.sh` gives the executable a cust
 lives in extended attributes, so the code signature stays valid. Registering through
 `SMAppService` instead does not work for a locally signed build; it fails with error 57.
 
-Install only this way. Adding the app under "Open at Login" as well makes it start twice.
+Install only this way. If the app also ends up under "Open at Login", both copies start at
+login; the second one notices the first and quits, so the menu bar still shows one item.
 
 To remove it:
 

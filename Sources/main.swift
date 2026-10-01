@@ -657,6 +657,17 @@ if CommandLine.arguments.contains("--dump") {
 }
 
 let app = NSApplication.shared
+
+// One menu bar item only. The launch agent is the intended way to start at login, but the app
+// keeps reappearing under "Open at Login" too, and then both copies start. Whichever starts
+// second leaves quietly.
+let me = NSRunningApplication.current
+if let bundleId = Bundle.main.bundleIdentifier,
+   NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+       .contains(where: { $0.processIdentifier != me.processIdentifier && !$0.isTerminated }) {
+    exit(0)
+}
+
 let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
