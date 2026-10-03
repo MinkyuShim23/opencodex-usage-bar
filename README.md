@@ -44,12 +44,16 @@ Three speeds:
   GPT numbers in that cache already update in-band with every Codex response.
 - Every ten seconds, the newest entry in the proxy's request log. When a new request has
   finished, the app reads again at once and asks the proxy to re-probe upstream
-  (`?refresh=1`), at most once a minute. That re-probe is what moves the Claude numbers, and it
+  (`?refresh=1`), at most once every ten minutes. That re-probe is what moves the Claude numbers, and it
   costs a real request to Anthropic, hence the limit.
 - Every ten minutes, the credit balances and reset grants, which rarely change.
 
-Opening the menu reads the proxy again (and the balances, if the last read is over a minute
-old). **Refresh now** forces everything.
+Opening the menu reads the proxy again (and the balances, if the last read is over five
+minutes old). **Refresh now** forces everything.
+
+Anthropic's usage endpoint rate-limits hard, and the proxy, this app and Claude Code all poll
+it with the same login. When a read fails, the last good numbers stay on screen and the
+section header shows "as of" the time they were read, once they are over 15 minutes old.
 
 Usage spent outside the proxy (claude.ai in a browser, for example) does not appear in the
 request log, so it shows up on the proxy's own five-minute cycle instead.

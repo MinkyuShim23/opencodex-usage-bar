@@ -11,8 +11,12 @@ import Foundation
 // Refresh has three speeds:
 // - every minute, a cached read from the proxy (free, local)
 // - every ten seconds, a look at the proxy's request log; when a new request has finished,
-//   the proxy is asked to re-probe upstream, at most once a minute
+//   the proxy is asked to re-probe upstream, at most once every ten minutes
 // - every ten minutes, the credit balances and reset grants
+//
+// Anthropic's usage endpoint rate-limits hard (HTTP 429), and the proxy, this app and Claude
+// Code all poll it with the same login. When a read fails, the last good values stay on screen
+// with an "as of" time instead of turning into "unavailable".
 
 let proxyBase = "http://127.0.0.1:10100"
 let tokenPath = NSString(string: "~/.opencodex/admin-api-token").expandingTildeInPath
@@ -23,9 +27,10 @@ let codexAuthPath: String = {
 }()
 let pollInterval: TimeInterval = 60
 let activityInterval: TimeInterval = 10
-let forcedMinGap: TimeInterval = 60
+let forcedMinGap: TimeInterval = 600
 let creditInterval: TimeInterval = 600
-let creditMinGap: TimeInterval = 60
+let creditMinGap: TimeInterval = 300
+let staleAfter: TimeInterval = 900
 let warnPercent = 70.0
 let dangerPercent = 90.0
 
@@ -442,6 +447,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var snapshot = Snapshot()
     private var credits = Credits()
     private var lastUpdated: Date?
+    private var claudeAsOf: Date?
+    private var gptAsOf: Date?
     private var lastRequestId: String?
     private var lastForced = Date.distantPast
     private var forcePending = false
@@ -486,7 +493,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refresh(force: Bool = false) {
         if force { lastForced = Date() }
         Task { @MainActor in
-            let next = await loadSnapshot(force: force)
+            var next = await loadSnapshot(force: force)
+            // One failed read should not blank the numbers; keep the last good ones.
+            if next.claudeOK {
+                self.claudeAsOf = Date()
+            } else if self.snapshot.claudeOK {
+                next.claudeWeekly = self.snapshot.claudeWeekly
+                next.claudeFive = self.snapshot.claudeFive
+                next.fable = self.snapshot.fable
+                next.claudeOK = true
+            }
+            if next.gptOK {
+                self.gptAsOf = Date()
+            } else if self.snapshot.gptOK {
+                next.gptWeekly = self.snapshot.gptWeekly
+                next.resetCredits = self.snapshot.resetCredits
+                next.gptOK = true
+            }
             self.snapshot = next
             if next.claudeOK || next.gptOK { self.lastUpdated = Date() }
             self.renderTitle()
@@ -583,7 +606,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hint.isEnabled = false
             menu.addItem(hint)
         } else {
-            addHeader("Claude")
+            addHeader(sectionTitle("Claude", asOf: claudeAsOf))
             addRow("Weekly", snapshot.claudeWeekly)
             addRow("Fable", snapshot.fable)
             addRow("5-hour", snapshot.claudeFive)
@@ -600,7 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             if let resets = credits.claudeResets { addNote("Resets", resetGrantText(resets)) }
             menu.addItem(.separator())
-            addHeader("GPT")
+            addHeader(sectionTitle("GPT", asOf: gptAsOf))
             addRow("Weekly", snapshot.gptWeekly)
             if let balance = credits.gptBalance { addNote("Credits", balanceText(balance, unlimited: credits.gptUnlimited)) }
             if let text = gptResetText(credits.gptResets, count: snapshot.resetCredits) { addNote("Resets", text) }
@@ -614,6 +637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Open dashboard", action: #selector(openDashboard), keyEquivalent: "d").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
+    }
+
+    private func sectionTitle(_ name: String, asOf: Date?) -> String {
+        guard let asOf, Date().timeIntervalSince(asOf) > staleAfter else { return name }
+        return name + " · as of " + resetFormatter.string(from: asOf)
     }
 }
 
