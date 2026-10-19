@@ -7,7 +7,7 @@ C 69%  G 8%
 ```
 
 Click it and the weekly numbers expand into Claude weekly / Fable / 5-hour / extra usage /
-reset grants, and GPT weekly / credit balance / reset credits. Bars turn orange at 70% and red
+API credits / reset grants, and GPT weekly / credit balance / reset credits. Bars turn orange at 70% and red
 at 90%.
 
 ## Where the numbers come from
@@ -20,6 +20,8 @@ proxy (`127.0.0.1:10100`), authenticated with `~/.opencodex/admin-api-token`.
 - `/api/anthropic/reset-grants` — Claude usage-limit reset grants
 - `/api/codex-auth/reset-credits?accountId=__main__` — GPT reset credits with expiry dates
 - `/api/request-history?limit=1` — only to notice that a request just finished
+- `/api/usage?provider=anthropic-apikey&since=…&until=…` — estimated spend of the Max plan's
+  monthly API credit (see below)
 
 Two balances the proxy reads but does not expose are fetched directly:
 
@@ -32,6 +34,20 @@ Those tokens are only read. If one has expired the app skips that value and keep
 one; it never refreshes a token, because a refresh would rotate it out from under the proxy.
 No browser cookies, no keychain access. If the proxy is not running the app shows `?` rather
 than pretending the usage is zero.
+
+The Max plan's monthly API credit (the Console's "Promotional credits") has no endpoint, so
+the app cannot read the balance. Instead, `~/.config/usage-bar/claude-api-credits.json`
+describes the grant as the Console shows it:
+
+```json
+{"limit": 200, "grantedAt": "2026-10-18", "expiresAt": "2026-11-21"}
+```
+
+and the row shows the proxy's estimated cost for the `anthropic-apikey` provider since the
+grant date against that limit (`provider` in the file overrides the provider name). Dates
+are UTC calendar days. Anything sent to the API outside the proxy is not counted, and the
+estimate uses list prices, so the Console is the authority. Without the file the row is
+hidden.
 
 This means the app is useless without opencodex. That is the point: existing menu bar meters
 read Codex only, so the Claude side of an opencodex setup stays invisible.
@@ -109,6 +125,7 @@ Weekly        ███████░░░  69%   09/10 04:59 (in 3h)
 Fable         ██████████ 100%   09/10 04:59 (in 3h)
 5-hour        █░░░░░░░░░   7%   09/10 05:49 (in 4h)
 Extra usage   $0.00 / $15.00 this month
+API credits   $0.00 / $200.00 est. · expires 11/21
 Resets        1 left · expires 10/23
 GPT
 Weekly        ░░░░░░░░░░   0%   09/14 12:38 (in 4.4d)
