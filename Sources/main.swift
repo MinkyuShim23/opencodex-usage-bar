@@ -6,9 +6,7 @@ import Foundation
 // Usage windows come from the local opencodex proxy (127.0.0.1:10100). Two balances the proxy
 // does not expose (Claude extra usage, GPT credits) are read directly from Anthropic and
 // ChatGPT with the access tokens the proxy and Codex already hold. Those tokens are only
-// read, never refreshed: refreshing would rotate them out from under the proxy. The Max
-// plan's monthly API credit has no endpoint at all, so its grant is described in a local file
-// and the proxy's cost estimate for the API-key provider stands in for the spend.
+// read, never refreshed: refreshing would rotate them out from under the proxy.
 //
 // Refresh has three speeds:
 // - every minute, a cached read from the proxy (free, local)
@@ -23,7 +21,6 @@ import Foundation
 let proxyBase = "http://127.0.0.1:10100"
 let tokenPath = NSString(string: "~/.opencodex/admin-api-token").expandingTildeInPath
 let opencodexAuthPath = NSString(string: "~/.opencodex/auth.json").expandingTildeInPath
-let apiCreditsPath = NSString(string: "~/.config/usage-bar/claude-api-credits.json").expandingTildeInPath
 let codexAuthPath: String = {
     let base = ProcessInfo.processInfo.environment["CODEX_HOME"] ?? NSString(string: "~/.codex").expandingTildeInPath
     return (base as NSString).appendingPathComponent("auth.json")
@@ -64,18 +61,9 @@ struct ResetGrants {
     var expiresAt: Date?
 }
 
-// The Max plan's monthly Console credit for the Claude API. Only the Console shows the
-// balance, so the grant comes from a local file and the spend is estimated.
-struct ApiCredits {
-    var limit: Double
-    var used: Double
-    var expiresAt: Date?
-}
-
 struct Credits {
     var claudeExtra: ExtraUsage?
     var claudeResets: ResetGrants?
-    var claudeApi: ApiCredits?
     var gptBalance: Double?
     var gptUnlimited = false
     var gptResets: ResetGrants?
@@ -234,34 +222,6 @@ func parseISO(_ text: String) -> Date? {
     isoParser.date(from: text) ?? isoFractionalParser.date(from: text)
 }
 
-// Console dates are calendar days in UTC.
-let dayParser: DateFormatter = {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.timeZone = TimeZone(identifier: "UTC")
-    f.dateFormat = "yyyy-MM-dd"
-    return f
-}()
-
-// Claude API credits. Nothing reports the balance, so ~/.config/usage-bar/claude-api-credits.json
-// describes the grant as the Console shows it, for example
-// {"limit": 200, "grantedAt": "2026-10-18", "expiresAt": "2026-11-21"}, and the proxy's
-// estimated cost for the API-key provider since the grant date stands in for the spend.
-// Traffic that bypasses the proxy is not counted; the Console stays the authority.
-func fetchApiCredits() async -> ApiCredits? {
-    guard let grant = readJSONFile(apiCreditsPath),
-          let limit = asNumber(grant["limit"]), limit > 0,
-          let grantedAt = (grant["grantedAt"] as? String).flatMap(dayParser.date),
-          let token = readToken() else { return nil }
-    let provider = (grant["provider"] as? String) ?? "anthropic-apikey"
-    let since = Int(grantedAt.timeIntervalSince1970 * 1000)
-    let until = Int(Date().timeIntervalSince1970 * 1000)
-    guard let body = await fetchJSON("/api/usage?provider=\(provider)&since=\(since)&until=\(until)", token: token),
-          let summary = body["summary"] as? [String: Any] else { return nil }
-    return ApiCredits(limit: limit, used: asNumber(summary["estimatedCostUsd"]) ?? 0,
-                      expiresAt: (grant["expiresAt"] as? String).flatMap(dayParser.date))
-}
-
 // Claude usage-limit reset grants, through the proxy (which reads Anthropic on every call).
 func fetchClaudeResets() async -> ResetGrants? {
     guard let token = readToken(),
@@ -301,11 +261,10 @@ func fetchGptCredits() async -> (balance: Double, unlimited: Bool)? {
 func loadCredits() async -> Credits {
     async let extra = fetchClaudeExtra()
     async let resets = fetchClaudeResets()
-    async let api = fetchApiCredits()
     async let gpt = fetchGptCredits()
     async let gptResets = fetchGptResets()
-    let (e, r, a, g, gr) = await (extra, resets, api, gpt, gptResets)
-    return Credits(claudeExtra: e, claudeResets: r, claudeApi: a, gptBalance: g?.balance,
+    let (e, r, g, gr) = await (extra, resets, gpt, gptResets)
+    return Credits(claudeExtra: e, claudeResets: r, gptBalance: g?.balance,
                    gptUnlimited: g?.unlimited ?? false, gptResets: gr)
 }
 
@@ -321,16 +280,6 @@ func moneyText(_ amount: Double, _ currency: String) -> String {
 
 func extraText(_ extra: ExtraUsage) -> String {
     moneyText(extra.used, extra.currency) + " / " + moneyText(extra.limit, extra.currency) + " this month"
-}
-
-// The expiry is a whole day in UTC, so the credit is gone once that day has ended.
-func apiCreditText(_ api: ApiCredits) -> String {
-    var text = moneyText(api.used, "USD") + " / " + moneyText(api.limit, "USD") + " est."
-    if let expiry = api.expiresAt {
-        let gone = Date() >= expiry.addingTimeInterval(86_400)
-        text += " \u{00B7} " + (gone ? "expired " : "expires ") + dayFormatter.string(from: expiry)
-    }
-    return text
 }
 
 func resetGrantText(_ resets: ResetGrants) -> String {
@@ -575,7 +524,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Keep the last good value of each field; one failed read should not blank it.
             if let v = next.claudeExtra { self.credits.claudeExtra = v }
             if let v = next.claudeResets { self.credits.claudeResets = v }
-            if let v = next.claudeApi { self.credits.claudeApi = v }
             if let v = next.gptResets { self.credits.gptResets = v }
             if let v = next.gptBalance { self.credits.gptBalance = v; self.credits.gptUnlimited = next.gptUnlimited }
             self.rebuildMenu()
@@ -673,13 +621,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     addNote("Extra usage", "off")
                 }
             }
-            if let api = credits.claudeApi {
-                let item = NSMenuItem()
-                item.view = rowView("API credits", Window(percent: api.used / api.limit * 100, resetAt: nil),
-                                    detail: apiCreditText(api))
-                item.isEnabled = false
-                menu.addItem(item)
-            }
             if let resets = credits.claudeResets { addNote("Resets", resetGrantText(resets)) }
             menu.addItem(.separator())
             addHeader(sectionTitle("GPT", asOf: gptAsOf))
@@ -734,7 +675,6 @@ if CommandLine.arguments.contains("--dump") {
         if let extra = cred.claudeExtra {
             print(padded("Extra usage", to: 14) + (extra.enabled ? extraText(extra) : "off"))
         }
-        if let api = cred.claudeApi { print(padded("API credits", to: 14) + apiCreditText(api)) }
         if let resets = cred.claudeResets { print(padded("Resets", to: 14) + resetGrantText(resets)) }
         print("GPT")
         line("Weekly", snap.gptWeekly)
