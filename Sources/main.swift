@@ -608,8 +608,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             addHeader(sectionTitle("Claude", asOf: claudeAsOf))
             addRow("Weekly", snapshot.claudeWeekly)
-            addRow("Fable", snapshot.fable)
-            addRow("5-hour", snapshot.claudeFive)
+            // Some plans (Ultra) have no 5-hour window and an inactive Fable limit; the proxy
+            // then omits them, so their rows only appear when the plan actually has them.
+            if let fable = snapshot.fable { addRow("Fable", fable) }
+            if let five = snapshot.claudeFive { addRow("5-hour", five) }
             if let extra = credits.claudeExtra {
                 if extra.enabled && extra.limit > 0 {
                     let item = NSMenuItem()
@@ -670,8 +672,8 @@ if CommandLine.arguments.contains("--dump") {
         }
         print("Claude")
         line("Weekly", snap.claudeWeekly)
-        line("Fable", snap.fable)
-        line("5-hour", snap.claudeFive)
+        if snap.fable != nil { line("Fable", snap.fable) }
+        if snap.claudeFive != nil { line("5-hour", snap.claudeFive) }
         if let extra = cred.claudeExtra {
             print(padded("Extra usage", to: 14) + (extra.enabled ? extraText(extra) : "off"))
         }
