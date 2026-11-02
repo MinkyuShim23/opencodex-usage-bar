@@ -10,8 +10,9 @@ Click it and the weekly numbers expand into Claude weekly / Fable / 5-hour / ext
 reset grants, and GPT weekly / credit balance / reset credits. Bars turn orange at 70% and red
 at 90%.
 
-The Fable and 5-hour rows appear only when the plan has those limits. On Claude Ultra the
-usage response has no 5-hour window and marks the Fable limit inactive, so only weekly shows.
+The 5-hour row appears only when the plan has that window; verified Claude Ultra accounts do
+not. Fable shows how much of its allowance (up to half the weekly limit) is used. The proxy
+drops the Fable limit while Anthropic marks it inactive, so the app then reads it directly.
 
 ## Where the numbers come from
 

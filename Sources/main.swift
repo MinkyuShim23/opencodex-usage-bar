@@ -63,6 +63,7 @@ struct ResetGrants {
 
 struct Credits {
     var claudeExtra: ExtraUsage?
+    var claudeFable: Window?
     var claudeResets: ResetGrants?
     var gptBalance: Double?
     var gptUnlimited = false
@@ -179,30 +180,44 @@ func latestRequestId() async -> String? {
     return entries.first?["requestId"] as? String ?? ""
 }
 
-// Claude extra usage. The proxy's usage probe drops this block, so read it from the same
+// Claude extra usage and the Fable limit. The proxy's usage probe drops both (it skips limits
+// marked inactive, and Ultra marks Fable inactive until it binds), so read them from the same
 // endpoint with the proxy's current access token. An expired token means skip, not refresh.
-func fetchClaudeExtra() async -> ExtraUsage? {
+func fetchClaudeDirect() async -> (extra: ExtraUsage?, fable: Window?) {
     guard let auth = readJSONFile(opencodexAuthPath)?["anthropic"] as? [String: Any],
           let activeId = auth["activeAccountId"] as? String,
           let accounts = auth["accounts"] as? [[String: Any]],
           let account = accounts.first(where: { ($0["id"] as? String) == activeId }),
           let credential = account["credential"] as? [String: Any],
-          let access = credential["access"] as? String else { return nil }
-    if let expires = asDate(credential["expires"]), expires.timeIntervalSinceNow < 60 { return nil }
+          let access = credential["access"] as? String else { return (nil, nil) }
+    if let expires = asDate(credential["expires"]), expires.timeIntervalSinceNow < 60 { return (nil, nil) }
 
     guard let body = await fetchURL("https://api.anthropic.com/api/oauth/usage", headers: [
         "Authorization": "Bearer " + access,
         "anthropic-beta": "oauth-2025-04-20",
         "User-Agent": "claude-cli/2.1.0",
-    ]), let extra = body["extra_usage"] as? [String: Any] else { return nil }
+    ]) else { return (nil, nil) }
+
+    // Fable may use up to half the weekly limit; percent is how much of that half is used.
+    let limits = body["limits"] as? [[String: Any]] ?? []
+    let fableRow = limits.first { row in
+        let scope = row["scope"] as? [String: Any]
+        let name = (scope?["model"] as? [String: Any])?["display_name"] as? String
+        return (row["kind"] as? String) == "weekly_scoped" && name?.lowercased().contains("fable") == true
+    }
+    let fable = fableRow.flatMap { row in
+        asNumber(row["percent"]).map { Window(percent: $0, resetAt: (row["resets_at"] as? String).flatMap(parseISO)) }
+    }
+
+    guard let extra = body["extra_usage"] as? [String: Any] else { return (nil, fable) }
 
     // Amounts arrive in minor units (cents for USD).
     let scale = pow(10, asNumber(extra["decimal_places"]) ?? 2)
-    return ExtraUsage(
+    return (ExtraUsage(
         enabled: (extra["is_enabled"] as? Bool) ?? false,
         used: (asNumber(extra["used_credits"]) ?? 0) / scale,
         limit: (asNumber(extra["monthly_limit"]) ?? 0) / scale,
-        currency: (extra["currency"] as? String) ?? "USD")
+        currency: (extra["currency"] as? String) ?? "USD"), fable)
 }
 
 let isoParser: ISO8601DateFormatter = {
@@ -259,12 +274,12 @@ func fetchGptCredits() async -> (balance: Double, unlimited: Bool)? {
 }
 
 func loadCredits() async -> Credits {
-    async let extra = fetchClaudeExtra()
+    async let direct = fetchClaudeDirect()
     async let resets = fetchClaudeResets()
     async let gpt = fetchGptCredits()
     async let gptResets = fetchGptResets()
-    let (e, r, g, gr) = await (extra, resets, gpt, gptResets)
-    return Credits(claudeExtra: e, claudeResets: r, gptBalance: g?.balance,
+    let (d, r, g, gr) = await (direct, resets, gpt, gptResets)
+    return Credits(claudeExtra: d.extra, claudeFable: d.fable, claudeResets: r, gptBalance: g?.balance,
                    gptUnlimited: g?.unlimited ?? false, gptResets: gr)
 }
 
@@ -523,6 +538,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let next = await loadCredits()
             // Keep the last good value of each field; one failed read should not blank it.
             if let v = next.claudeExtra { self.credits.claudeExtra = v }
+            if let v = next.claudeFable { self.credits.claudeFable = v }
             if let v = next.claudeResets { self.credits.claudeResets = v }
             if let v = next.gptResets { self.credits.gptResets = v }
             if let v = next.gptBalance { self.credits.gptBalance = v; self.credits.gptUnlimited = next.gptUnlimited }
@@ -608,9 +624,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             addHeader(sectionTitle("Claude", asOf: claudeAsOf))
             addRow("Weekly", snapshot.claudeWeekly)
-            // Some plans (Ultra) have no 5-hour window and an inactive Fable limit; the proxy
-            // then omits them, so their rows only appear when the plan actually has them.
-            if let fable = snapshot.fable { addRow("Fable", fable) }
+            // Ultra has no 5-hour window, so that row only appears when the plan has one.
+            // Fable comes from the proxy when it reports it, otherwise from the direct read.
+            if let fable = snapshot.fable ?? credits.claudeFable { addRow("Fable", fable) }
             if let five = snapshot.claudeFive { addRow("5-hour", five) }
             if let extra = credits.claudeExtra {
                 if extra.enabled && extra.limit > 0 {
@@ -672,7 +688,7 @@ if CommandLine.arguments.contains("--dump") {
         }
         print("Claude")
         line("Weekly", snap.claudeWeekly)
-        if snap.fable != nil { line("Fable", snap.fable) }
+        if let fable = snap.fable ?? cred.claudeFable { line("Fable", fable) }
         if snap.claudeFive != nil { line("5-hour", snap.claudeFive) }
         if let extra = cred.claudeExtra {
             print(padded("Extra usage", to: 14) + (extra.enabled ? extraText(extra) : "off"))
