@@ -1,13 +1,15 @@
 # usage-bar
 
-A macOS menu bar readout of Claude and GPT subscription usage, in one place.
+A macOS menu bar readout of Claude, GPT and Google Antigravity subscription usage, in one place.
 
 ```
-C 69%  G 8%
+C 69%  G 8%  A 1%
 ```
 
 Click it and the weekly numbers expand into Claude weekly / Fable / 5-hour / extra usage /
-reset grants, and GPT weekly / credit balance / reset credits. Bars turn orange at 70% and red
+reset grants, GPT weekly / credit balance / reset credits, and every Antigravity window the
+proxy reports (Gemini and Claude 5-hour and weekly, plus model-specific weekly limits). The
+`A` value is the busiest Antigravity weekly window; it appears only when Antigravity is set up. Bars turn orange at 70% and red
 at 90%.
 
 The 5-hour row appears only when the plan has that window; verified Claude Ultra accounts do
@@ -19,7 +21,7 @@ drops the Fable limit while Anthropic marks it inactive, so the app then reads i
 Mostly from the local [opencodex](https://www.npmjs.com/package/@bitkyc08/opencodex)
 proxy (`127.0.0.1:10100`), authenticated with `~/.opencodex/admin-api-token`.
 
-- `/api/provider-quotas` — Anthropic 5-hour, weekly, and Fable
+- `/api/provider-quotas` — Anthropic 5-hour, weekly, and Fable; Google Antigravity windows
 - `/api/codex-auth/quota` — Codex weekly and reset credits
 - `/api/anthropic/reset-grants` — Claude usage-limit reset grants
 - `/api/codex-auth/reset-credits?accountId=__main__` — GPT reset credits with expiry dates

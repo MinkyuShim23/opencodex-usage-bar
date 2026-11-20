@@ -39,14 +39,37 @@ struct Window {
     var resetAt: Date?
 }
 
+// One Antigravity quota window, already renamed for display ("Gemini weekly").
+struct NamedWindow {
+    var name: String
+    var window: Window
+}
+
 struct Snapshot {
     var claudeWeekly: Window?
     var claudeFive: Window?
     var fable: Window?
     var gptWeekly: Window?
     var resetCredits: Int?
+    var antigravity: [NamedWindow] = []
     var claudeOK = false
     var gptOK = false
+    var antigravityOK = false
+
+    // The menu bar shows the busiest weekly Antigravity window, matching the weekly C and G values.
+    var antigravityTitle: Window? {
+        antigravity.filter { $0.name.hasSuffix("weekly") }.map(\.window).max { $0.percent < $1.percent }
+    }
+}
+
+// The proxy labels Antigravity windows by model group, abbreviated ("Gem", "Cla (Weekly)").
+// Unlabeled windows are the 5-hour ones. Unknown groups keep the proxy's name.
+func antigravityName(_ label: String) -> String {
+    let weekly = label.lowercased().contains("(weekly)")
+    let base = label.replacingOccurrences(of: "(Weekly)", with: "", options: .caseInsensitive)
+        .trimmingCharacters(in: .whitespaces)
+    let group = ["Gem": "Gemini", "Cla": "Claude"][base] ?? base
+    return group + (weekly ? " weekly" : " 5-hour")
 }
 
 struct ExtraUsage {
@@ -166,6 +189,16 @@ func loadSnapshot(force: Bool = false) async -> Snapshot {
             snapshot.resetCredits = asNumber(account["resetCredits"]).map { Int($0) }
             snapshot.gptOK = snapshot.gptWeekly != nil
         }
+    }
+
+    if let reports = providers?["reports"] as? [[String: Any]],
+       let google = reports.first(where: { ($0["provider"] as? String) == "google-antigravity" }),
+       let windows = (google["quota"] as? [String: Any])?["customWindows"] as? [[String: Any]] {
+        snapshot.antigravity = windows.compactMap { row in
+            guard let label = row["label"] as? String, let window = makeWindow(row["percent"], row["resetAt"]) else { return nil }
+            return NamedWindow(name: antigravityName(label), window: window)
+        }
+        snapshot.antigravityOK = !snapshot.antigravity.isEmpty
     }
 
     return snapshot
@@ -464,6 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastUpdated: Date?
     private var claudeAsOf: Date?
     private var gptAsOf: Date?
+    private var antigravityAsOf: Date?
     private var lastRequestId: String?
     private var lastForced = Date.distantPast
     private var forcePending = false
@@ -525,8 +559,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 next.resetCredits = self.snapshot.resetCredits
                 next.gptOK = true
             }
+            if next.antigravityOK {
+                self.antigravityAsOf = Date()
+            } else if self.snapshot.antigravityOK {
+                next.antigravity = self.snapshot.antigravity
+                next.antigravityOK = true
+            }
             self.snapshot = next
-            if next.claudeOK || next.gptOK { self.lastUpdated = Date() }
+            if next.claudeOK || next.gptOK || next.antigravityOK { self.lastUpdated = Date() }
             self.renderTitle()
             self.rebuildMenu()
         }
@@ -589,6 +629,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]))
         title.append(segment("G", snapshot.gptWeekly))
+        if snapshot.antigravityOK {
+            title.append(NSAttributedString(string: "  ", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]))
+            title.append(segment("A", snapshot.antigravityTitle))
+        }
         statusItem.button?.attributedTitle = title
     }
 
@@ -616,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildMenu() {
         menu.removeAllItems()
 
-        if !snapshot.claudeOK && !snapshot.gptOK {
+        if !snapshot.claudeOK && !snapshot.gptOK && !snapshot.antigravityOK {
             addHeader("Can't reach the opencodex proxy")
             let hint = NSMenuItem(title: "Run  ocx start  in a terminal", action: nil, keyEquivalent: "")
             hint.isEnabled = false
@@ -645,6 +692,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             addRow("Weekly", snapshot.gptWeekly)
             if let balance = credits.gptBalance { addNote("Credits", balanceText(balance, unlimited: credits.gptUnlimited)) }
             if let text = gptResetText(credits.gptResets, count: snapshot.resetCredits) { addNote("Resets", text) }
+            if snapshot.antigravityOK {
+                menu.addItem(.separator())
+                addHeader(sectionTitle("Antigravity", asOf: antigravityAsOf))
+                for row in snapshot.antigravity { addRow(row.name, row.window) }
+            }
         }
 
         menu.addItem(.separator())
@@ -698,6 +750,10 @@ if CommandLine.arguments.contains("--dump") {
         line("Weekly", snap.gptWeekly)
         if let balance = cred.gptBalance { print(padded("Credits", to: 14) + balanceText(balance, unlimited: cred.gptUnlimited)) }
         if let text = gptResetText(cred.gptResets, count: snap.resetCredits) { print(padded("Resets", to: 14) + text) }
+        if snap.antigravityOK {
+            print("Antigravity")
+            for row in snap.antigravity { line(row.name, row.window) }
+        }
     }
     exit(0)
 }
