@@ -34,6 +34,11 @@ let staleAfter: TimeInterval = 900
 let warnPercent = 70.0
 let dangerPercent = 90.0
 
+// Section headers. The proxy does not report plan names, so change these with the subscription.
+let gptHeader = "ChatGPT Plus"
+let claudeHeader = "Claude Ultra"
+let googleHeader = "Google AI Pro"
+
 struct Window {
     var percent: Double
     var resetAt: Date?
@@ -56,9 +61,15 @@ struct Snapshot {
     var gptOK = false
     var antigravityOK = false
 
-    // The menu bar shows the busiest weekly Antigravity window, matching the weekly C and G values.
+    // Claude through Antigravity is left out: Claude has its own plan above it. 5-hour windows
+    // appear only once they are in use.
+    var antigravityShown: [NamedWindow] {
+        antigravity.filter { !$0.name.hasPrefix("Claude ") && ($0.name.hasSuffix("weekly") || $0.window.percent > 0) }
+    }
+
+    // The menu bar shows the busiest weekly Antigravity window, matching the other weekly values.
     var antigravityTitle: Window? {
-        antigravity.filter { $0.name.hasSuffix("weekly") }.map(\.window).max { $0.percent < $1.percent }
+        antigravityShown.filter { $0.name.hasSuffix("weekly") }.map(\.window).max { $0.percent < $1.percent }
     }
 }
 
@@ -339,6 +350,19 @@ func resetGrantText(_ resets: ResetGrants) -> String {
     return text
 }
 
+// Brand marks from Simple Icons (CC0), bundled as SVG. Drawn in the menu bar text color so they
+// follow light and dark menu bars.
+func brandIcon(_ name: String, size: CGFloat) -> NSImage? {
+    guard let path = Bundle.main.path(forResource: name, ofType: "svg"),
+          let source = NSImage(contentsOfFile: path) else { return nil }
+    return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        source.draw(in: rect)
+        NSColor.labelColor.set()
+        rect.fill(using: .sourceAtop)
+        return true
+    }
+}
+
 // The detailed read carries expiry dates but refreshes every ten minutes; the count from the
 // quota store refreshes every minute. When they disagree a credit was just used or granted, so
 // the date may belong to the wrong credit: show the fresh count alone until the next detailed read.
@@ -608,33 +632,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func segment(_ label: String, _ window: Window?) -> NSAttributedString {
+    private func segment(_ icon: String, _ letter: String, _ window: Window?) -> NSAttributedString {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        guard let window else {
-            return NSAttributedString(string: label + " ?", attributes: [
-                .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
-            ])
+        let result = NSMutableAttributedString()
+        if let image = brandIcon(icon, size: 13) {
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            attachment.bounds = NSRect(x: 0, y: ((font.capHeight - 13) / 2).rounded(), width: 13, height: 13)
+            result.append(NSAttributedString(attachment: attachment))
+        } else {
+            result.append(NSAttributedString(string: letter, attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
         }
-        let text = label + " " + String(Int(window.percent.rounded())) + "%"
-        return NSAttributedString(string: text, attributes: [
+        guard let window else {
+            result.append(NSAttributedString(string: " ?", attributes: [
+                .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
+            ]))
+            return result
+        }
+        let text = " " + String(Int(window.percent.rounded())) + "%"
+        result.append(NSAttributedString(string: text, attributes: [
             .font: font, .foregroundColor: color(for: window.percent),
-        ])
+        ]))
+        return result
     }
 
     private func renderTitle() {
+        var segments = [segment("openai", "G", snapshot.gptWeekly), segment("claude", "C", snapshot.claudeWeekly)]
+        if snapshot.antigravityOK { segments.append(segment("googlegemini", "A", snapshot.antigravityTitle)) }
         let title = NSMutableAttributedString()
-        title.append(segment("C", snapshot.claudeWeekly))
-        title.append(NSAttributedString(string: "  ", attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor.tertiaryLabelColor,
-        ]))
-        title.append(segment("G", snapshot.gptWeekly))
-        if snapshot.antigravityOK {
-            title.append(NSAttributedString(string: "  ", attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ]))
-            title.append(segment("A", snapshot.antigravityTitle))
+        for (index, part) in segments.enumerated() {
+            if index > 0 {
+                title.append(NSAttributedString(string: "  ", attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular),
+                ]))
+            }
+            title.append(part)
         }
         statusItem.button?.attributedTitle = title
     }
@@ -669,7 +701,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hint.isEnabled = false
             menu.addItem(hint)
         } else {
-            addHeader(sectionTitle("Claude", asOf: claudeAsOf))
+            addHeader(sectionTitle(gptHeader, asOf: gptAsOf))
+            addRow("Weekly", snapshot.gptWeekly)
+            if let balance = credits.gptBalance { addNote("Credits", balanceText(balance, unlimited: credits.gptUnlimited)) }
+            if let text = gptResetText(credits.gptResets, count: snapshot.resetCredits), text != "none" { addNote("Resets", text) }
+            menu.addItem(.separator())
+            addHeader(sectionTitle(claudeHeader, asOf: claudeAsOf))
             addRow("Weekly", snapshot.claudeWeekly)
             // Ultra has no 5-hour window, so that row only appears when the plan has one.
             // Fable comes from the proxy when it reports it, otherwise from the direct read.
@@ -686,16 +723,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     addNote("Extra usage", "off")
                 }
             }
-            if let resets = credits.claudeResets { addNote("Resets", resetGrantText(resets)) }
-            menu.addItem(.separator())
-            addHeader(sectionTitle("GPT", asOf: gptAsOf))
-            addRow("Weekly", snapshot.gptWeekly)
-            if let balance = credits.gptBalance { addNote("Credits", balanceText(balance, unlimited: credits.gptUnlimited)) }
-            if let text = gptResetText(credits.gptResets, count: snapshot.resetCredits) { addNote("Resets", text) }
+            if let resets = credits.claudeResets, resets.left > 0 { addNote("Resets", resetGrantText(resets)) }
             if snapshot.antigravityOK {
                 menu.addItem(.separator())
-                addHeader(sectionTitle("Antigravity", asOf: antigravityAsOf))
-                for row in snapshot.antigravity { addRow(row.name, row.window) }
+                addHeader(sectionTitle(googleHeader, asOf: antigravityAsOf))
+                for row in snapshot.antigravityShown { addRow(row.name, row.window) }
             }
         }
 
@@ -738,21 +770,21 @@ if CommandLine.arguments.contains("--dump") {
             let gap = String(repeating: " ", count: max(0, 4 - percent.count))
             print(head + barString(window.percent) + " " + gap + percent + "   " + resetText(window.resetAt))
         }
-        print("Claude")
+        print(gptHeader)
+        line("Weekly", snap.gptWeekly)
+        if let balance = cred.gptBalance { print(padded("Credits", to: 14) + balanceText(balance, unlimited: cred.gptUnlimited)) }
+        if let text = gptResetText(cred.gptResets, count: snap.resetCredits), text != "none" { print(padded("Resets", to: 14) + text) }
+        print(claudeHeader)
         line("Weekly", snap.claudeWeekly)
         if let fable = snap.fable ?? cred.claudeFable { line("Fable", fable) }
         if snap.claudeFive != nil { line("5-hour", snap.claudeFive) }
         if let extra = cred.claudeExtra {
             print(padded("Extra usage", to: 14) + (extra.enabled ? extraText(extra) : "off"))
         }
-        if let resets = cred.claudeResets { print(padded("Resets", to: 14) + resetGrantText(resets)) }
-        print("GPT")
-        line("Weekly", snap.gptWeekly)
-        if let balance = cred.gptBalance { print(padded("Credits", to: 14) + balanceText(balance, unlimited: cred.gptUnlimited)) }
-        if let text = gptResetText(cred.gptResets, count: snap.resetCredits) { print(padded("Resets", to: 14) + text) }
+        if let resets = cred.claudeResets, resets.left > 0 { print(padded("Resets", to: 14) + resetGrantText(resets)) }
         if snap.antigravityOK {
-            print("Antigravity")
-            for row in snap.antigravity { line(row.name, row.window) }
+            print(googleHeader)
+            for row in snap.antigravityShown { line(row.name, row.window) }
         }
     }
     exit(0)

@@ -9,6 +9,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$root/Info.plist" "$app/Contents/Info.plist"
 cp "$root/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
+cp "$root"/icons/*.svg "$app/Contents/Resources/"
 
 swiftc -O \
   -target arm64-apple-macos14.0 \

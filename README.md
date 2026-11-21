@@ -1,16 +1,24 @@
 # usage-bar
 
-A macOS menu bar readout of Claude, GPT and Google Antigravity subscription usage, in one place.
+A macOS menu bar readout of ChatGPT, Claude and Google Antigravity subscription usage, in one place.
 
 ```
-C 69%  G 8%  A 1%
+[OpenAI] 41%  [Claude] 6%  [Gemini] 3%
 ```
 
-Click it and the weekly numbers expand into Claude weekly / Fable / 5-hour / extra usage /
-reset grants, GPT weekly / credit balance / reset credits, and every Antigravity window the
-proxy reports (Gemini and Claude 5-hour and weekly, plus model-specific weekly limits). The
-`A` value is the busiest Antigravity weekly window; it appears only when Antigravity is set up. Bars turn orange at 70% and red
-at 90%.
+Each service shows as its logo and weekly percentage. Click it and the numbers expand into
+ChatGPT weekly / credit balance / reset credits, Claude weekly / Fable / 5-hour / extra usage /
+reset grants, and the Antigravity Gemini windows (weekly, plus model-specific weekly limits).
+The Gemini value is the busiest Antigravity weekly window; it appears only when Antigravity is
+set up. Bars turn orange at 70% and red at 90%.
+
+To keep the menu short, some rows appear only when they carry information: reset rows when a
+reset is left, Antigravity 5-hour rows once they are in use. Claude windows inside Antigravity
+are not shown, because Claude has its own section. Section headers carry the plan names, set at
+the top of `Sources/main.swift` (the proxy does not report them).
+
+Logos come from [Simple Icons](https://simpleicons.org) (CC0) in `icons/`. The brands belong to
+their owners.
 
 The 5-hour row appears only when the plan has that window; verified Claude Ultra accounts do
 not. Fable shows how much of its allowance (up to half the weekly limit) is used. The proxy
@@ -110,16 +118,17 @@ rm -rf "/Applications/Usage Bar.app"
 ```
 
 ```
-Claude
-Weekly        ███████░░░  69%   09/10 04:59 (in 3h)
-Fable         ██████████ 100%   09/10 04:59 (in 3h)
-5-hour        █░░░░░░░░░   7%   09/10 05:49 (in 4h)
+ChatGPT Plus
+Weekly        ████░░░░░░  41%   11/21 17:08 (in 5h)
+Credits       180 credits
+Claude Ultra
+Weekly        █░░░░░░░░░   6%   11/26 05:00 (in 4.7d)
+Fable         ░░░░░░░░░░   2%   11/26 04:59 (in 4.7d)
 Extra usage   $0.00 / $15.00 this month
-Resets        1 left · expires 10/23
-GPT
-Weekly        ░░░░░░░░░░   0%   09/14 12:38 (in 4.4d)
-Credits       0 credits
-Resets        3 left · next expires 10/30
+Resets        2 left · next expires 12/11
+Google AI Pro
+Gemini weekly ░░░░░░░░░░   3%   11/27 19:30 (in 6.3d)
+Argon weekly  ░░░░░░░░░░   0%   11/27 19:31 (in 6.3d)
 ```
 
 ## Icon
